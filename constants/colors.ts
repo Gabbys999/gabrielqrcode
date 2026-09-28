@@ -8,4 +8,7 @@ export const COLORS = {
   surface: '#E3F2FD',
   border: '#E0E8F0',
   shadow: '#0D47A1',
+  warning: '#C97A2B',
+  success: '#2E7D32',
+  danger: '#B3261E',
 } as const;

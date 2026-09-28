@@ -1,1 +1,1 @@
-export const STUDENT_ID = 'STUDENT-2026-001';
+export const STUDENT_ID = 'STUDENT-2024-5523';

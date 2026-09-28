@@ -16,7 +16,9 @@ import QRCode from 'react-native-qrcode-svg';
 
 import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
-import { createEvent } from '@/lib/database';
+import { createEvent } from '@/lib/events';
+import { buildQRPayload } from '@/lib/qr';
+import { useRole } from '@/lib/role';
 
 function toLocalISO(date: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -53,6 +55,8 @@ export default function TeacherScreen() {
   const [editingPart, setEditingPart] = useState<'date' | 'time'>('date');
   const [payload, setPayload] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const { role, loading: roleLoading } = useRole();
 
   const isAndroid = Platform.OS === 'android';
 
@@ -112,19 +116,33 @@ export default function TeacherScreen() {
       return;
     }
 
-    createEvent(event).then(() => {
+    createEvent(event).then(({ error }) => {
+      if (error) {
+        setMessage(`Could not save the event: ${error}`);
+        return;
+      }
       setMessage('Event saved! Scan the QR with the Scan tab to test it.');
-      setPayload(
-        JSON.stringify({
-          v: 1,
-          event: event.eventId,
-          title: event.title,
-          start: event.start,
-          end: event.end,
-        })
-      );
+      setPayload(buildQRPayload(event));
     });
   };
+
+    if (roleLoading) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.subtitle}>Checking your account...</Text>
+      </View>
+    );
+  }
+
+  if (role !== 'teacher') {
+    return (
+      <View style={styles.centered}>
+        <Ionicons name="lock-closed-outline" size={48} color={COLORS.textSecondary} />
+        <Text style={styles.lockTitle}>Teachers Only</Text>
+        <Text style={styles.lockText}>Only teacher accounts can create events.</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -267,7 +285,7 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: COLORS.card,
-    borderRadius: 14,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
     paddingHorizontal: 14,
@@ -277,7 +295,7 @@ const styles = StyleSheet.create({
   },
   pickerField: {
     backgroundColor: COLORS.card,
-    borderRadius: 14,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
     paddingHorizontal: 14,
@@ -328,15 +346,12 @@ const styles = StyleSheet.create({
   },
   resultCard: {
     backgroundColor: COLORS.card,
-    borderRadius: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     padding: 16,
     marginTop: 20,
     alignItems: 'center',
-    shadowColor: COLORS.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   resultTitle: {
     fontSize: 15,
@@ -346,7 +361,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   qrBox: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFFFFF', // stays pure white on purpose: QR codes need max contrast to scan
     padding: 12,
     borderRadius: 10,
     marginBottom: 12,
@@ -356,5 +371,25 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 16,
+  },
+  centered: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  lockTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  lockText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

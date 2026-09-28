@@ -92,16 +92,16 @@ export default function LoginScreen() {
 
               {error && <Text style={styles.error}>{error}</Text>}
 
-              {loading ? (
-                <ActivityIndicator size="large" color={COLORS.primary} style={styles.loader} />
-              ) : (
-                <AppButton
-                  theme="primary"
-                  title="Sign In"
-                  icon="log-in-outline"
-                  onPress={handleLogin}
-                />
-              )}
+                {loading ? (
+                  <ActivityIndicator size="large" color={COLORS.primary} style={styles.loader} />
+                ) : (
+                  <AppButton
+                    theme="primary"
+                    title="Sign In"
+                    icon="log-in-outline"
+                    onPress={handleLogin}
+                  />
+                )}
             </View>
 
             <Link href="/register" style={styles.link}>
@@ -133,16 +133,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '700',
     color: COLORS.textPrimary,
-    textAlign: 'center',
     marginBottom: 4,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 15,
+    lineHeight: 21,
     color: COLORS.textSecondary,
-    textAlign: 'center',
     marginBottom: 32,
   },
   form: {
@@ -157,23 +156,22 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: COLORS.card,
-    borderRadius: 14,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 15,
+    fontSize: 16,
     color: COLORS.textPrimary,
   },
   error: {
     fontSize: 14,
-    color: '#C62828',
-    textAlign: 'center',
+    color: COLORS.danger,
     marginTop: 12,
     marginBottom: 4,
   },
   loader: {
-    marginVertical: 16,
+    marginBottom: 16,
   },
   link: {
     fontSize: 14,
