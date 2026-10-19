@@ -1,0 +1,208 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+
+import AppButton from '@/components/AppButton';
+import { COLORS } from '@/constants/colors';
+
+import { useAuth } from '@/lib/auth';
+import { registerAttendance } from '@/lib/attendance';
+import { useRole } from '@/lib/role';
+
+export default function ScanScreen() {
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanned, setScanned] = useState(false);
+  const [lastData, setLastData] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const { user } = useAuth();
+  const { role, loading: roleLoading, error: roleError } = useRole();
+
+  if (roleLoading) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.subtitle}>Checking your account...</Text>
+      </View>
+    );
+  }
+
+  if (role !== 'student') {
+    return (
+      <View style={styles.centered}>
+        <Ionicons name="lock-closed-outline" size={48} color={COLORS.textSecondary} />
+        <Text style={styles.lockTitle}>Students Only</Text>
+        <Text style={styles.lockText}>
+          {roleError ?? 'Attendance scanning is only available to student accounts.'}
+        </Text>
+      </View>
+    );
+  }
+
+  if (!permission) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={COLORS.primary} />
+        <Text style={styles.lockText}>Checking camera permission...</Text>
+      </View>
+    );
+  }
+
+  if (!permission.granted) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Camera Permission Needed</Text>
+        <Text style={styles.subtitle}>
+          We need access to your camera to scan QR codes.
+        </Text>
+        <AppButton
+          theme="primary"
+          title="Grant Permission"
+          icon="camera"
+          onPress={requestPermission}
+        />
+      </View>
+    );
+  }
+
+const handleBarcodeScanned = async ({ data }: { data: string }) => {
+  if (scanned || processing) return;
+  setScanned(true);
+  setProcessing(true);
+  setLastData(data);
+  setMessage(null);
+  try {
+    if (!user) {
+      setMessage('Please sign in before recording attendance.');
+      setSuccess(false);
+      return;
+    }
+    const result = await registerAttendance(data, user.id);
+    setMessage(result.message);
+    setSuccess(result.success);
+  } catch (error) {
+    setMessage(error instanceof Error ? error.message : 'Could not record attendance.');
+    setSuccess(false);
+  } finally {
+    setProcessing(false);
+  }
+};
+
+const handleScanAgain = () => {
+  setScanned(false);
+  setLastData(null);
+  setMessage(null);
+  setSuccess(false);
+  setProcessing(false);
+};
+
+
+  return (
+    <View style={styles.container}>
+      <CameraView
+        style={styles.camera}
+        facing="back"
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+      />
+
+      <View style={styles.overlay}>
+        <Text style={styles.overlayText}>
+          {scanned ? 'QR Code detected!' : 'Point your camera at a QR code'}
+        </Text>
+
+      {scanned && message && (
+       <Text
+         style={[styles.scanResult, success ? styles.success : styles.error]}
+       >
+         {processing ? 'Checking event and saving attendance...' : message}
+         </Text>
+          )}
+
+        {scanned && lastData && (
+          <Text style={styles.scanData}>{lastData}</Text>
+        )}
+
+
+        {scanned && (
+          <AppButton
+            theme="primary"
+            title="Scan Again"
+            icon="refresh"
+            onPress={handleScanAgain}
+          />
+        )}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  camera: {
+    ...StyleSheet.absoluteFill,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  overlay: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 60,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 16,
+    alignItems: 'center',
+  },
+  overlayText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+scanResult: { fontSize: 14, textAlign: 'center', marginBottom: 8, fontWeight: '600' },
+success:    { color: COLORS.success },   // green — attendance recorded
+error:      { color: COLORS.danger },    // red — failed / duplicate
+scanData:   { fontSize: 12, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 12 },
+  centered: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  lockTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  lockText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+});
