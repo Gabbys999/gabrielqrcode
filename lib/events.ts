@@ -1,6 +1,17 @@
 import { supabase } from './supabase';
 
 export type EventStatus = 'open' | 'closed';
+export type AdminHistoryStatus = 'DONE' | 'NEW' | 'COMING SOON';
+
+export function getAdminHistoryStatus(
+  status: EventStatus,
+  startTime: string | null,
+  currentTime = Date.now()
+): AdminHistoryStatus {
+  if (status === 'closed') return 'DONE';
+  if (startTime && new Date(startTime).getTime() > currentTime) return 'COMING SOON';
+  return 'NEW';
+}
 
 export type EventInput = {
   eventId: string;
@@ -30,26 +41,37 @@ function errorMessage(error: { message: string } | null, fallback: string | null
 
 export async function createEvent(
   event: EventInput
-): Promise<{ error: string | null }> {
+): Promise<{ error: string | null; eventCode: string | null }> {
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
-  if (authError) return { error: authError.message };
-  if (!user) return { error: 'Sign in before creating an event.' };
+  if (authError) return { error: authError.message, eventCode: null };
+  if (!user) return { error: 'Sign in before creating an event.', eventCode: null };
 
-  const { error } = await supabase.from('events').insert({
-    event_code: event.eventId,
-    title: event.title,
-    start_time: event.start || null,
-    end_time: event.end || null,
-    venue: event.venue,
-    description: event.description,
-    status: 'open',
-    created_by: user.id,
-  });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const eventCode = attempt === 0 ? event.eventId : `${event.eventId}-${attempt + 1}`;
+    const { error } = await supabase.from('events').insert({
+      event_code: eventCode,
+      title: event.title,
+      start_time: event.start || null,
+      end_time: event.end || null,
+      venue: event.venue,
+      description: event.description,
+      status: 'open',
+      created_by: user.id,
+    });
 
-  return { error: errorMessage(error, 'Could not create event.') };
+    if (!error) return { error: null, eventCode };
+    if (error.code !== '23505' || !error.message.includes('events_event_code_key')) {
+      return { error: error.message, eventCode: null };
+    }
+  }
+
+  return {
+    error: 'This event code is already in use. Please choose a different event code.',
+    eventCode: null,
+  };
 }
 
 export async function updateEvent(
@@ -107,18 +129,24 @@ export async function getEventsByTeacher(teacherId: string): Promise<CloudEvent[
   return (data ?? []) as CloudEvent[];
 }
 
-export async function getAvailableEvents(): Promise<CloudEvent[]> {
+export async function getAllEvents(): Promise<CloudEvent[]> {
   const { data, error } = await supabase
     .from('events')
     .select('*')
-    .eq('status', 'open')
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []) as CloudEvent[];
+}
+
+export async function getStudentEvents(): Promise<CloudEvent[]> {
+  const { data, error } = await supabase
+    .from('events')
+    .select('*')
     .order('start_time', { ascending: true });
 
   if (error) throw new Error(error.message);
-  const now = Date.now();
-  return ((data ?? []) as CloudEvent[]).filter(
-    (event) => !event.end_time || new Date(event.end_time).getTime() >= now
-  );
+  return (data ?? []) as CloudEvent[];
 }
 
 export async function getEventByCode(code: string): Promise<CloudEvent | null> {

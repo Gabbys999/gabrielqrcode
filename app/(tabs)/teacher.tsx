@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useCallback } from 'react';
 import {
@@ -14,19 +14,17 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
 
 import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
 import {
   createEvent,
+  getAllEvents,
   getEventsByTeacher,
-  setEventStatus,
   updateEvent,
   type CloudEvent,
 } from '@/lib/events';
 import { useAuth } from '@/lib/auth';
-import { buildQRPayload } from '@/lib/qr';
 import { useRole } from '@/lib/role';
 
 function toLocalISO(date: Date) {
@@ -43,13 +41,18 @@ function formatDateTime(date: Date) {
 
 const QUICK_END_OPTIONS = [
   { label: '+30 min', ms: 30 * 60 * 1000 },
-  { label: '+1 hour', ms: 60 * 60 * 1000 },
-  { label: '+2 hours', ms: 2 * 60 * 60 * 1000 },
+  ...Array.from({ length: 8 }, (_, index) => {
+    const hours = index + 1;
+    return {
+      label: `+${hours} ${hours === 1 ? 'hour' : 'hours'}`,
+      ms: hours * 60 * 60 * 1000,
+    };
+  }),
 ];
 
 type EditTarget = 'start' | 'end';
 
-export default function TeacherScreen() {
+export function TeacherEventTools({ embedded = false }: { embedded?: boolean }) {
   const [title, setTitle] = useState('');
   const [eventId, setEventId] = useState('');
   const [venue, setVenue] = useState('');
@@ -64,23 +67,23 @@ export default function TeacherScreen() {
   );
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [editingPart, setEditingPart] = useState<'date' | 'time'>('date');
-  const [payload, setPayload] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const { role, loading: roleLoading, error: roleError } = useRole();
   const { user } = useAuth();
+  const router = useRouter();
 
   const loadEvents = useCallback(async () => {
     if (!user) return;
     setEventsLoading(true);
     try {
-      setEvents(await getEventsByTeacher(user.id));
+      setEvents(role === 'admin' ? await getAllEvents() : await getEventsByTeacher(user.id));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not load your events.');
     } finally {
       setEventsLoading(false);
     }
-  }, [user]);
+  }, [role, user]);
 
   useFocusEffect(
     useCallback(() => {
@@ -134,7 +137,6 @@ export default function TeacherScreen() {
     setVenue('');
     setDescription('');
     setEditingEventId(null);
-    setPayload(null);
   };
 
   const handleSaveEvent = async () => {
@@ -165,52 +167,29 @@ export default function TeacherScreen() {
     setSaving(true);
     setMessage(null);
     try {
-      const { error } = editingEventId
-        ? await updateEvent(editingEventId, event)
-        : await createEvent(event);
+      let error: string | null;
+      if (editingEventId) {
+        ({ error } = await updateEvent(editingEventId, event));
+      } else {
+        const result = await createEvent(event);
+        error = result.error;
+        if (result.eventCode) {
+          setEventId(result.eventCode);
+        }
+      }
       if (error) {
         setMessage(`Could not save the event: ${error}`);
         return;
       }
-      setMessage(editingEventId ? 'Event updated.' : 'Event saved! Scan the QR with the Scan tab.');
-      setPayload(buildQRPayload(event));
+      setMessage(
+        editingEventId
+          ? 'Event updated.'
+          : 'Event saved. View its QR in Manage Your Events.'
+      );
       await loadEvents();
       setEditingEventId(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not save the event.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const beginEdit = (event: CloudEvent) => {
-    setEditingEventId(event.id);
-    setEventId(event.event_code);
-    setTitle(event.title);
-    setVenue(event.venue);
-    setDescription(event.description);
-    setStartDate(event.start_time ? new Date(event.start_time) : new Date());
-    setEndDate(event.end_time ? new Date(event.end_time) : new Date(Date.now() + 60 * 60 * 1000));
-    setPayload(null);
-    setMessage(null);
-  };
-
-  const handleToggleEvent = async (event: CloudEvent) => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const { error } = await setEventStatus(
-        event.id,
-        event.status === 'open' ? 'closed' : 'open'
-      );
-      if (error) {
-        setMessage(`Could not change event status: ${error}`);
-        return;
-      }
-      setMessage(`Event ${event.status === 'open' ? 'closed' : 'reopened'}.`);
-      await loadEvents();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not change event status.');
     } finally {
       setSaving(false);
     }
@@ -236,12 +215,8 @@ export default function TeacherScreen() {
     );
   }
 
-  return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+  const eventToolsContent = (
+    <>
       <Text style={styles.title}>{editingEventId ? 'Edit Event' : 'Create Event QR'}</Text>
       <Text style={styles.subtitle}>
         Fill in the event details, then scan the generated QR with the Scan tab.
@@ -338,49 +313,51 @@ export default function TeacherScreen() {
         </View>
       )}
 
-      {payload && (
-        <View style={styles.resultCard}>
-          <Text style={styles.resultTitle}>
-            Scan this QR code with the Scan tab:
-          </Text>
-          <View style={styles.qrBox}>
-            <QRCode value={payload} size={200} />
-          </View>
-          <Text style={styles.payloadText}>{payload}</Text>
-        </View>
-      )}
-
       <View style={styles.eventsSection}>
         <Text style={styles.title}>Manage Your Events</Text>
         {eventsLoading ? <Text style={styles.subtitle}>Loading events...</Text> : null}
         {!eventsLoading && events.length === 0 ? (
-          <Text style={styles.subtitle}>You have not created any events yet.</Text>
+          <Text style={styles.subtitle}>No events found.</Text>
         ) : null}
         {events.map((event) => (
-          <View key={event.id} style={styles.eventCard}>
-            <Text style={styles.resultTitle}>{event.title}</Text>
-            <Text style={styles.hint}>{event.event_code} · {event.status.toUpperCase()}</Text>
-            <Text style={styles.hint}>Venue: {event.venue}</Text>
-            <Text style={styles.hint}>{event.description}</Text>
-            <View style={styles.manageRow}>
-              <Pressable style={styles.manageButton} onPress={() => beginEdit(event)} disabled={saving}>
-                <Text style={styles.manageButtonText}>Edit</Text>
-              </Pressable>
-              <Pressable
-                style={styles.manageButton}
-                onPress={() => handleToggleEvent(event)}
-                disabled={saving}
-              >
-                <Text style={styles.manageButtonText}>
-                  {event.status === 'open' ? 'Close Event' : 'Reopen Event'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+          <Pressable
+            key={event.id}
+            style={({ pressed }) => [styles.eventTitleCard, pressed && styles.pickerFieldPressed]}
+            onPress={() =>
+              router.push({
+                pathname: '/(tabs)/manage-events',
+                params: {
+                  eventId: event.id,
+                  ...(embedded ? { returnTo: 'admin' } : {}),
+                },
+              })
+            }
+          >
+            <Text style={styles.eventTitleText}>{event.title}</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.primary} />
+          </Pressable>
         ))}
       </View>
+    </>
+  );
+
+  return embedded ? (
+    <View style={styles.embeddedCard}>
+      <View style={styles.embeddedContent}>{eventToolsContent}</View>
+    </View>
+  ) : (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      {eventToolsContent}
     </ScrollView>
   );
+}
+
+export default function TeacherScreen() {
+  return <TeacherEventTools />;
 }
 
 type PickerFieldProps = {
@@ -412,6 +389,16 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 40,
   },
+  embeddedCard: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 20,
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  embeddedContent: { paddingTop: 4, paddingBottom: 12 },
   title: {
     fontSize: 20,
     fontWeight: '600',
@@ -464,6 +451,7 @@ const styles = StyleSheet.create({
   },
   chipRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     marginTop: 8,
   },
   chip: {
@@ -472,6 +460,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     marginRight: 8,
+    marginBottom: 8,
   },
   chipText: {
     fontSize: 13,
@@ -493,17 +482,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 12,
   },
-  resultCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 16,
-    marginTop: 20,
-    alignItems: 'center',
-  },
   eventsSection: { marginTop: 28 },
-  eventCard: {
+  eventTitleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.card,
     borderRadius: 10,
     borderWidth: 1,
@@ -511,32 +493,11 @@ const styles = StyleSheet.create({
     padding: 16,
     marginTop: 10,
   },
-  manageRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
-  manageButton: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  manageButtonText: { color: COLORS.primary, fontWeight: '700' },
-  resultTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+  eventTitleText: {
+    flex: 1,
     color: COLORS.textPrimary,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  qrBox: {
-    backgroundColor: '#FFFFFF', // stays pure white on purpose: QR codes need max contrast to scan
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 12,
-  },
-  payloadText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    lineHeight: 16,
+    fontSize: 16,
+    fontWeight: '600',
   },
   centered: {
     flex: 1,

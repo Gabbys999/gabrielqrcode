@@ -154,13 +154,12 @@ export default function RegisterScreen() {
                     </Text>
                   </Pressable>
                 </View>
-
                 <Text style={styles.label}>Email</Text>
                 <TextInput
                   style={styles.input}
                   value={email}
                   onChangeText={setEmail}
-                  placeholder="your.email@school.edu"
+                  placeholder="Enter your email"
                   placeholderTextColor={COLORS.textSecondary}
                   autoCapitalize="none"
                   keyboardType="email-address"
@@ -172,7 +171,7 @@ export default function RegisterScreen() {
                   style={styles.input}
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="At least 6 characters"
+                  placeholder="Enter your password"
                   placeholderTextColor={COLORS.textSecondary}
                   secureTextEntry
                   editable={!loading}
@@ -183,7 +182,7 @@ export default function RegisterScreen() {
                   style={styles.input}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
-                  placeholder="Re-enter your password"
+                  placeholder="Confirm your password"
                   placeholderTextColor={COLORS.textSecondary}
                   secureTextEntry
                   editable={!loading}
@@ -191,16 +190,18 @@ export default function RegisterScreen() {
 
                 {error && <Text style={styles.error}>{error}</Text>}
 
-                {loading ? (
-                  <ActivityIndicator size="large" color={COLORS.primary} style={styles.loader} />
-                ) : (
-                  <AppButton
-                    theme="primary"
-                    title="Sign Up"
-                    icon="person-add-outline"
-                    onPress={handleRegister}
-                  />
-                )}
+                <View style={styles.action}>
+                  {loading ? (
+                    <ActivityIndicator size="large" color={COLORS.primary} style={styles.loader} />
+                  ) : (
+                    <AppButton
+                      theme="primary"
+                      title="Sign Up"
+                      icon="person-add-outline"
+                      onPress={handleRegister}
+                    />
+                  )}
+                </View>
               </View>
             )}
 
@@ -248,6 +249,9 @@ const styles = StyleSheet.create({
   },
   form: {
     marginBottom: 24,
+  },
+  action: {
+    marginTop: 10,
   },
   label: {
     fontSize: 14,

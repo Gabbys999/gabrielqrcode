@@ -3,11 +3,15 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text not null,
   full_name text,
+  avatar_url text,
   role text not null default 'student'
     check (role in ('student', 'teacher', 'admin')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.profiles
+  add column if not exists avatar_url text;
 
 alter table public.profiles
   drop constraint if exists profiles_role_check;
@@ -53,6 +57,47 @@ create table if not exists public.attendance (
     check (status in ('present', 'late', 'excused', 'absent')),
   unique (student_id, event_id)
 );
+
+insert into storage.buckets (id, name, public)
+values ('profile-photos', 'profile-photos', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Users can upload their own profile photos"
+on storage.objects;
+
+create policy "Users can upload their own profile photos"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'profile-photos'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+drop policy if exists "Users can update their own profile photos"
+on storage.objects;
+
+create policy "Users can update their own profile photos"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id = 'profile-photos'
+  and (storage.foldername(name))[1] = auth.uid()::text
+)
+with check (
+  bucket_id = 'profile-photos'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+drop policy if exists "Profile photos are publicly readable"
+on storage.objects;
+
+create policy "Profile photos are publicly readable"
+on storage.objects
+for select
+to public
+using (bucket_id = 'profile-photos');
 
 alter table public.attendance
   add column if not exists status text not null default 'present';
@@ -115,6 +160,43 @@ as $$
   );
 $$;
 
+create or replace function public.get_event_student_attendance(p_event_id uuid)
+returns table (
+  student_id uuid,
+  full_name text,
+  avatar_url text,
+  scanned_at timestamptz,
+  attendance_status text
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() and not exists (
+    select 1
+    from public.events e
+    where e.id = p_event_id
+      and e.created_by = auth.uid()
+  ) then
+    raise exception 'You do not have permission to view this event roster.';
+  end if;
+
+  return query
+  select p.id, p.full_name, p.avatar_url, a.scanned_at, a.status
+  from public.profiles p
+  left join public.attendance a
+    on a.student_id = p.id
+    and a.event_id = p_event_id
+  where p.role = 'student'
+  order by a.scanned_at asc nulls last, p.full_name asc;
+end;
+$$;
+
+revoke all on function public.get_event_student_attendance(uuid) from public;
+grant execute on function public.get_event_student_attendance(uuid) to authenticated;
+
 drop policy if exists "Administrators can view all profiles"
 on public.profiles;
 
@@ -141,6 +223,23 @@ on public.profiles
 for select
 using (auth.uid() = id);
 
+drop policy if exists "Teachers can view profiles of event attendees"
+on public.profiles;
+
+create policy "Teachers can view profiles of event attendees"
+on public.profiles
+for select
+using (
+  public.can_manage_events()
+  and exists (
+    select 1
+    from public.attendance a
+    join public.events e on e.id = a.event_id
+    where a.student_id = profiles.id
+      and e.created_by = auth.uid()
+  )
+);
+
 drop policy if exists "Users can insert their own profile"
 on public.profiles;
 
@@ -165,10 +264,10 @@ security definer
 set search_path = public
 as $$
 begin
-  if old.role is distinct from new.role
-    and auth.uid() is not null
-    and not public.is_admin() then
-    raise exception 'Only an administrator can change account roles.';
+  if auth.uid() is not null and not public.is_admin() then
+    if old.role is distinct from new.role then
+      raise exception 'Only an administrator can change account roles.';
+    end if;
   end if;
 
   return new;

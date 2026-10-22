@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import * as Linking from 'expo-linking';
 import { supabase } from './supabase';
 import type { Session, User } from '@supabase/supabase-js';
 
@@ -98,6 +99,38 @@ export async function signIn(email: string, password: string) {
     setAuth(data.session);
   }
   return { data, error };
+}
+
+export async function requestPasswordReset(email: string) {
+  return supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo: Linking.createURL('reset-password'),
+  });
+}
+
+export async function handlePasswordRecoveryUrl(url: string): Promise<boolean> {
+  const [urlWithoutHash, hash = ''] = url.split('#', 2);
+  const queryString = urlWithoutHash.split('?')[1] ?? '';
+  const query = new URLSearchParams(queryString);
+  const fragment = new URLSearchParams(hash);
+  const getParameter = (name: string) => query.get(name) ?? fragment.get(name);
+  const recoveryType = getParameter('type');
+  const isResetPath = urlWithoutHash.includes('reset-password');
+
+  if (recoveryType !== 'recovery' && !isResetPath) return false;
+
+  const linkError = getParameter('error_description') ?? getParameter('error');
+  if (linkError) throw new Error(linkError);
+
+  const code = getParameter('code');
+  const result = code
+    ? await supabase.auth.exchangeCodeForSession(code)
+    : await supabase.auth.setSession({
+        access_token: getParameter('access_token') ?? '',
+        refresh_token: getParameter('refresh_token') ?? '',
+      });
+
+  if (result.error) throw new Error(result.error.message);
+  return true;
 }
 
 export async function signOut() {

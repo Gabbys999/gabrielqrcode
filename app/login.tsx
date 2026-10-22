@@ -76,7 +76,7 @@ export default function LoginScreen() {
                 style={styles.input}
                 value={email}
                 onChangeText={setEmail}
-                placeholder="your.email@school.edu"
+                placeholder="Mobile number or email"
                 placeholderTextColor={COLORS.textSecondary}
                 autoCapitalize="none"
                 keyboardType="email-address"
@@ -96,6 +96,7 @@ export default function LoginScreen() {
 
               {error && <Text style={styles.error}>{error}</Text>}
 
+              <View style={styles.action}>
                 {loading ? (
                   <ActivityIndicator size="large" color={COLORS.primary} style={styles.loader} />
                 ) : (
@@ -106,7 +107,12 @@ export default function LoginScreen() {
                     onPress={handleLogin}
                   />
                 )}
+              </View>
             </View>
+
+            <Link href="/forgot-password" style={styles.forgotLink}>
+              Forgot Password?
+            </Link>
 
             <Link href="/register" style={styles.link}>
               Don't have an account? Sign Up
@@ -151,6 +157,9 @@ const styles = StyleSheet.create({
   form: {
     marginBottom: 24,
   },
+  action: {
+    marginTop: 10,
+  },
   label: {
     fontSize: 14,
     fontWeight: '600',
@@ -182,5 +191,12 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     textAlign: 'center',
     fontWeight: '600',
+  },
+  forgotLink: {
+    fontSize: 14,
+    color: COLORS.primary,
+    textAlign: 'center',
+    fontWeight: '600',
+    marginBottom: 18,
   },
 });

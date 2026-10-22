@@ -10,6 +10,7 @@ export type AttendanceRecord = {
   id: string;
   eventId: string;
   eventTitle: string;
+  eventStart: string | null;
   scannedAt: string;
   status: 'present' | 'late' | 'excused' | 'absent';
 };
@@ -48,7 +49,7 @@ export async function registerAttendance(
     return { success: false, message: 'This event does not exist. Ask the teacher for a valid QR code.' };
   }
   if (event.status !== 'open') {
-    return { success: false, message: 'This event is closed; attendance is no longer available.' };
+    return { success: false, message: 'Invalid QR code: this event is closed.' };
   }
 
   const now = Date.now();
@@ -56,10 +57,10 @@ export async function registerAttendance(
   const end = event.end_time ? new Date(event.end_time).getTime() : null;
 
   if (start !== null && now < start) {
-    return { success: false, message: 'Event has not started yet.' };
+    return { success: false, message: 'Invalid QR code: this event has not started yet.' };
   }
-  if (end !== null && now > end) {
-    return { success: false, message: 'Event has already ended.' };
+  if (end !== null && now >= end) {
+    return { success: false, message: 'Invalid QR code: this event has already ended.' };
   }
 
   const { error: attError } = await supabase.from('attendance').insert([
@@ -88,7 +89,7 @@ export async function getAttendanceHistory(
 ): Promise<AttendanceRecord[]> {
   const { data, error } = await supabase
     .from('attendance')
-    .select('id, scanned_at, status, events ( event_code, title )')
+    .select('id, scanned_at, status, events ( event_code, title, start_time )')
     .eq('student_id', studentId)
     .order('scanned_at', { ascending: false });
 
@@ -101,6 +102,7 @@ export async function getAttendanceHistory(
     id: row.id,
     eventId: row.events?.event_code ?? '',
     eventTitle: row.events?.title ?? '',
+    eventStart: row.events?.start_time ?? null,
     scannedAt: row.scanned_at,
     status: row.status,
   }));
@@ -116,12 +118,48 @@ export type TeacherEventAttendance = {
   title: string;
   startTime: string | null;
   endTime: string | null;
+  eventStatus: 'open' | 'closed';
   attendeeCount: number;
   attendees: {
     studentId: string;
     scannedAt: string;
     status: 'present' | 'late' | 'excused' | 'absent';
   }[];
+};
+
+export type TeacherEventAttendanceDetail = {
+  eventId: string;
+  eventCode: string;
+  title: string;
+  startTime: string | null;
+  endTime: string | null;
+  eventStatus: 'open' | 'closed';
+  attendeeCount: number;
+  attendees: {
+    studentId: string;
+    studentName: string;
+    avatarUrl: string | null;
+    scannedAt: string;
+    status: 'present' | 'late' | 'excused' | 'absent';
+  }[];
+  absentStudents: {
+    studentId: string;
+    studentName: string;
+    avatarUrl: string | null;
+  }[];
+};
+
+type EventStudentAttendanceRow = {
+  student_id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  scanned_at: string | null;
+  attendance_status: 'present' | 'late' | 'excused' | 'absent' | null;
+};
+
+type PresentEventStudentAttendanceRow = EventStudentAttendanceRow & {
+  scanned_at: string;
+  attendance_status: 'present' | 'late' | 'excused' | 'absent';
 };
 
 export type TeacherEventSummary = {
@@ -136,7 +174,7 @@ export async function getTeacherEventAttendance(
 ): Promise<TeacherEventAttendance[]> {
   const { data: events, error: eventError } = await supabase
     .from('events')
-    .select('id, event_code, title, start_time, end_time')
+    .select('id, event_code, title, start_time, end_time, status')
     .eq('created_by', teacherId)
     .order('created_at', { ascending: false });
 
@@ -163,6 +201,7 @@ export async function getTeacherEventAttendance(
       title: e.title,
       startTime: e.start_time,
       endTime: e.end_time,
+      eventStatus: e.status,
       attendeeCount: rows.length,
       attendees: rows.map((a: any) => ({
         studentId: a.student_id,
@@ -171,6 +210,56 @@ export async function getTeacherEventAttendance(
       })),
     };
   });
+}
+
+export async function getTeacherEventAttendanceDetail(
+  teacherId: string,
+  eventId: string
+): Promise<TeacherEventAttendanceDetail | null> {
+  const { data: event, error: eventError } = await supabase
+    .from('events')
+    .select('id, event_code, title, start_time, end_time, status')
+    .eq('id', eventId)
+    .eq('created_by', teacherId)
+    .maybeSingle();
+
+  if (eventError) throw new Error(eventError.message);
+  if (!event) return null;
+
+  const { data: roster, error: rosterError } = await supabase.rpc(
+    'get_event_student_attendance',
+    { p_event_id: eventId }
+  );
+  if (rosterError) throw new Error(rosterError.message);
+
+  const records = (roster ?? []) as EventStudentAttendanceRow[];
+  const attendanceRecords = records.filter(
+    (record): record is PresentEventStudentAttendanceRow =>
+      record.scanned_at !== null && record.attendance_status !== null
+  );
+  const absentRecords = records.filter((record) => record.scanned_at === null);
+
+  return {
+    eventId: event.id,
+    eventCode: event.event_code,
+    title: event.title,
+    startTime: event.start_time,
+    endTime: event.end_time,
+    eventStatus: event.status,
+    attendeeCount: attendanceRecords.length,
+    attendees: attendanceRecords.map((record) => ({
+      studentId: record.student_id,
+      studentName: record.full_name?.trim() || `Student …${record.student_id.slice(-8)}`,
+      avatarUrl: record.avatar_url,
+      scannedAt: record.scanned_at,
+      status: record.attendance_status,
+    })),
+    absentStudents: absentRecords.map((record) => ({
+      studentId: record.student_id,
+      studentName: record.full_name?.trim() || `Student …${record.student_id.slice(-8)}`,
+      avatarUrl: record.avatar_url,
+    })),
+  };
 }
 
 export async function getTeacherEventSummary(

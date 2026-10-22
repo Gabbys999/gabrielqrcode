@@ -1,11 +1,23 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
 import { useAuth, signOut } from '@/lib/auth';
-import { getProfile, updateProfile, type Profile } from '@/lib/profiles';
+import { getProfile, updateProfile, uploadProfilePhoto, type Profile } from '@/lib/profiles';
 
 export default function ProfileScreen() {
   const { user } = useAuth();
@@ -15,6 +27,7 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [photoSaving, setPhotoSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
@@ -59,6 +72,40 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleChangePhoto = async () => {
+    if (!user) return;
+
+    try {
+      if (Platform.OS !== 'web') {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('Permission required', 'Allow photo library access to choose a profile picture.');
+          return;
+        }
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (result.canceled) return;
+
+      const image = result.assets[0];
+      if (!image) throw new Error('No photo was selected.');
+      setPhotoSaving(true);
+      const avatarUrl = await uploadProfilePhoto(user.id, image.uri, image.mimeType ?? null);
+      const { error } = await updateProfile(user.id, { avatar_url: avatarUrl });
+      if (error) throw new Error(error);
+      setProfile((current) => (current ? { ...current, avatar_url: avatarUrl } : current));
+    } catch (error) {
+      Alert.alert('Could not update photo', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setPhotoSaving(false);
+    }
+  };
+
   const handleSignOut = async () => {
     setLoading(true);
     try {
@@ -81,36 +128,64 @@ export default function ProfileScreen() {
 
       {user && (
         <View style={styles.infoCard}>
-          <View style={[styles.roleBadge, !isTeacher && styles.roleBadgeStudent]}>
-            <Text style={styles.roleBadgeText}>{roleName}</Text>
-          </View>
-
-          <Text style={styles.label}>Full Name</Text>
-          {editing ? (
-            <View style={styles.nameEditRow}>
-              <TextInput
-                style={styles.nameInput}
-                value={draftName}
-                onChangeText={setDraftName}
-                placeholder="Your full name"
-                placeholderTextColor={COLORS.textSecondary}
-                autoCapitalize="words"
-                editable={!saving}
-              />
-              <Pressable
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                onPress={handleSaveName}
-                disabled={saving}
-              >
-                <Text style={styles.saveButtonText}>{saving ? '...' : 'Save'}</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable onPress={() => setEditing(true)} style={styles.nameRow}>
-              <Text style={styles.value}>{profile?.full_name || 'Tap to add your name'}</Text>
-              <Text style={styles.editHint}>Edit</Text>
+          <View style={styles.profileHeader}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Change profile photo"
+              onPress={handleChangePhoto}
+              disabled={photoSaving}
+              style={styles.avatarButton}
+            >
+              {profile?.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.avatar} contentFit="cover" />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Ionicons name="person" size={34} color={COLORS.textSecondary} />
+                </View>
+              )}
+              {photoSaving ? (
+                <View style={styles.avatarLoading}>
+                  <ActivityIndicator color={COLORS.textOnPrimary} />
+                </View>
+              ) : (
+                <View style={styles.cameraBadge}>
+                  <Ionicons name="camera" size={14} color={COLORS.textOnPrimary} />
+                </View>
+              )}
             </Pressable>
-          )}
+
+            <View style={styles.profileHeaderInfo}>
+              <View style={[styles.roleBadge, !isTeacher && styles.roleBadgeStudent]}>
+                <Text style={styles.roleBadgeText}>{roleName}</Text>
+              </View>
+              {editing ? (
+                <View style={styles.nameEditRow}>
+                  <TextInput
+                    style={styles.nameInput}
+                    value={draftName}
+                    onChangeText={setDraftName}
+                    placeholder="Your full name"
+                    placeholderTextColor={COLORS.textSecondary}
+                    autoCapitalize="words"
+                    editable={!saving}
+                  />
+                  <Pressable
+                    style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                    onPress={handleSaveName}
+                    disabled={saving}
+                  >
+                    <Text style={styles.saveButtonText}>{saving ? '...' : 'Save'}</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable onPress={() => setEditing(true)} style={styles.nameRow}>
+                  <Text style={styles.value}>{profile?.full_name || 'Tap to add your name'}</Text>
+                  <Text style={styles.editHint}>Edit</Text>
+                </Pressable>
+              )}
+              <Text style={styles.photoHint}>Tap photo to change</Text>
+            </View>
+          </View>
 
           <Text style={styles.label}>Email</Text>
           <Text style={styles.value}>{user.email}</Text>
@@ -167,6 +242,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginBottom: 8,
+  },
+  avatarButton: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    position: 'relative',
+  },
+  avatar: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: COLORS.surface,
+  },
+  avatarPlaceholder: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  cameraBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.card,
+  },
+  avatarLoading: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 44,
+    backgroundColor: '#00000066',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileHeaderInfo: { flex: 1, minWidth: 0 },
+  photoHint: { color: COLORS.textSecondary, fontSize: 12, marginTop: 8 },
   error: { color: COLORS.danger, marginBottom: 12 },
   label: {
     fontSize: 12,

@@ -37,7 +37,13 @@
       ],
       "expo-sqlite",
       "@react-native-community/datetimepicker",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow QR Attendance to access your photos so you can set a profile picture."
+        }
+      ]
     ],
     "experiments": {
       "reactCompiler": true

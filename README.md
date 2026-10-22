@@ -30,13 +30,17 @@ service-role key in the app.
 
 1. Open the project's Supabase SQL Editor.
 2. Run all of `lib/supabase/schema.sql`. It creates or migrates the `profiles`,
-   `events`, and `attendance` tables, relationships, role/status constraints,
-   helper functions, triggers, and Row Level Security policies.
+   `events`, and `attendance` tables, the profile-photo storage bucket and
+   policies, relationships, role/status constraints, helper functions,
+   triggers, and Row Level Security policies.
 3. In Supabase Auth settings, choose whether new accounts require email
    confirmation.
-4. Register from the app using an email you control. Only Student and Teacher
+4. In Supabase Auth URL Configuration, allow the app's password-reset redirect
+   URL (`qr-attendance://reset-password` for native builds, plus the URL used by
+   your web deployment if applicable).
+5. Register from the app using an email you control. Only Student and Teacher
    can be chosen publicly; new accounts default to Student in the database.
-5. For the first administrator, run the role-promotion query above.
+6. For the first administrator, run the role-promotion query above.
 
 The database enforces unique event codes and one attendance row per student
 per event. RLS limits profile access, event management to teachers/admins,
@@ -64,6 +68,7 @@ scheduled time, and attendance corrections to admins.
 | Event | Handler/action | Result |
 |---|---|---|
 | Student presses Sign In | Validate fields and call Supabase Auth | Session opens or an error is shown |
+| User requests a password reset | Send a Supabase Auth reset email to the registered address | The email link opens the app's new-password screen |
 | Camera detects a QR code | Parse payload and load event from Supabase | Invalid, unavailable, or valid event result |
 | Attendance insert is submitted | Check event window and insert the student/event row | Confirmation or duplicate/error feedback |
 | Teacher saves an event | Validate fields and insert/update the event | Event list and generated QR refresh |
@@ -78,6 +83,8 @@ scheduled time, and attendance corrections to admins.
   does not store plaintext passwords.
 - Sessions persist through Expo SecureStore and are restored when the app
   starts.
+- Profile photos are stored in the public `profile-photos` bucket. Only each
+  signed-in user can upload or replace files in their own user-ID folder.
 - Public registration accepts only Student or Teacher. Database triggers and
   RLS prevent users from promoting themselves to Administrator.
 - Never put a Supabase service-role key or other private credential in the app.

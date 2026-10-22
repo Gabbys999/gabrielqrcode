@@ -64,10 +64,26 @@ export default function TabLayout() {
         name="teacher"
         options={{
           title: 'Teacher',
-          href: role === 'teacher' || role === 'admin' ? undefined : null,
+          href: role === 'teacher' ? undefined : null,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'clipboard' : 'clipboard-outline'} color={color} size={24} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="manage-events"
+        options={{
+          title: 'Manage Events',
+          href: null,
+          headerShown: false,
+        }}
+      />
+      <Tabs.Screen
+        name="event-attendance"
+        options={{
+          title: 'Event Attendance',
+          href: null,
+          headerShown: false,
         }}
       />
       <Tabs.Screen

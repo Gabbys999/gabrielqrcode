@@ -1,8 +1,9 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,22 +14,16 @@ import {
 
 import { COLORS } from '@/constants/colors';
 import {
-  correctAttendanceTime,
-  deleteAttendanceRecord,
-  deleteManagedEvent,
   getAdminDashboardData,
-  setManagedEventStatus,
-  updateManagedEvent,
-  updateAttendanceStatus,
   updateManagedProfile,
   type AdminDashboardData,
 } from '@/lib/admin';
 import { useAuth } from '@/lib/auth';
 import type { Role } from '@/lib/profiles';
 import { useRole } from '@/lib/role';
+import { TeacherEventTools } from './teacher';
 
-const ROLE_OPTIONS: Role[] = ['student', 'teacher', 'admin'];
-const ATTENDANCE_STATUSES = ['present', 'late', 'excused', 'absent'] as const;
+const ROLE_OPTIONS: Role[] = ['student', 'teacher'];
 
 export default function AdminScreen() {
   const { user } = useAuth();
@@ -38,12 +33,12 @@ export default function AdminScreen() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [userNames, setUserNames] = useState<Record<string, string>>({});
-  const [eventTitles, setEventTitles] = useState<Record<string, string>>({});
-  const [eventStarts, setEventStarts] = useState<Record<string, string>>({});
-  const [eventEnds, setEventEnds] = useState<Record<string, string>>({});
-  const [eventVenues, setEventVenues] = useState<Record<string, string>>({});
-  const [eventDescriptions, setEventDescriptions] = useState<Record<string, string>>({});
-  const [attendanceTimes, setAttendanceTimes] = useState<Record<string, string>>({});
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [expandedUserGroups, setExpandedUserGroups] = useState<Record<Role, boolean>>({
+    admin: false,
+    teacher: false,
+    student: false,
+  });
 
   const load = useCallback(async () => {
     if (!user || role !== 'admin') {
@@ -57,20 +52,6 @@ export default function AdminScreen() {
       setDashboard(data);
       setUserNames(
         Object.fromEntries(data.profiles.map((profile) => [profile.id, profile.full_name ?? '']))
-      );
-      setEventTitles(Object.fromEntries(data.events.map((event) => [event.id, event.title])));
-      setEventStarts(
-        Object.fromEntries(data.events.map((event) => [event.id, event.start_time ?? '']))
-      );
-      setEventEnds(Object.fromEntries(data.events.map((event) => [event.id, event.end_time ?? ''])));
-      setEventVenues(Object.fromEntries(data.events.map((event) => [event.id, event.venue])));
-      setEventDescriptions(
-        Object.fromEntries(data.events.map((event) => [event.id, event.description]))
-      );
-      setAttendanceTimes(
-        Object.fromEntries(
-          data.attendance.map((record) => [record.id, new Date(record.scanned_at).toISOString()])
-        )
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load administrator records.');
@@ -127,35 +108,15 @@ export default function AdminScreen() {
     );
   }
 
-  const nameById = new Map(dashboard.profiles.map((profile) => [profile.id, profile.full_name || profile.email]));
-  const eventById = new Map(dashboard.events.map((event) => [event.id, event]));
-
-  const confirmDeleteEvent = (eventId: string, title: string) => {
-    Alert.alert('Delete event?', `This will also remove attendance for "${title}".`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => perform(eventId, () => deleteManagedEvent(eventId)),
-      },
-    ]);
-  };
-
-  const confirmDeleteAttendance = (id: string) => {
-    Alert.alert('Delete attendance record?', 'This action cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => perform(id, () => deleteAttendanceRecord(id)),
-      },
-    ]);
-  };
+  const managedProfiles = dashboard.profiles.filter((profile) => profile.role !== 'admin');
+  const teacherProfiles = managedProfiles.filter((profile) => profile.role === 'teacher');
+  const studentProfiles = managedProfiles.filter((profile) => profile.role === 'student');
+  const selectedProfile = managedProfiles.find((profile) => profile.id === selectedProfileId);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Administrator Dashboard</Text>
-      <Text style={styles.muted}>Manage users, events, attendance, and system records.</Text>
+      <Text style={styles.muted}>Manage users, attendance, and system records.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.summaryRow}>
@@ -167,209 +128,149 @@ export default function AdminScreen() {
         <SummaryCard label="Open events" value={dashboard.totals.openEvents} />
         <SummaryCard label="Closed events" value={dashboard.totals.closedEvents} />
       </View>
-      <Text style={styles.reportTitle}>Attendance status report</Text>
-      <View style={styles.summaryRow}>
-        <SummaryCard label="Present" value={dashboard.totals.attendanceByStatus.present} />
-        <SummaryCard label="Late" value={dashboard.totals.attendanceByStatus.late} />
-      </View>
-      <View style={styles.summaryRow}>
-        <SummaryCard label="Excused" value={dashboard.totals.attendanceByStatus.excused} />
-        <SummaryCard label="Absent" value={dashboard.totals.attendanceByStatus.absent} />
-      </View>
-      <Text style={styles.note}>Lists below show the latest 100 records in each category.</Text>
-
       <Section title="Manage users">
-        {dashboard.profiles.map((profile) => (
-          <View key={profile.id} style={styles.card}>
-            <Text style={styles.muted}>{profile.email}</Text>
-            <Text style={styles.smallMuted}>{profile.id}</Text>
-            <TextInput
-              value={userNames[profile.id] ?? ''}
-              onChangeText={(value) =>
-                setUserNames((current) => ({ ...current, [profile.id]: value }))
-              }
-              style={styles.input}
-              placeholder="Full name"
-              placeholderTextColor={COLORS.textSecondary}
-            />
-            <ActionButton
-              title="Save name"
-              disabled={savingId === profile.id || !(userNames[profile.id] ?? '').trim()}
-              onPress={() =>
-                perform(profile.id, () =>
-                  updateManagedProfile(profile.id, {
-                    full_name: (userNames[profile.id] ?? '').trim(),
-                  })
-                )
-              }
-            />
-            {profile.id === user?.id ? (
-              <Text style={styles.note}>Your own administrator role cannot be changed here.</Text>
-            ) : (
-              <View style={styles.chipRow}>
-                {ROLE_OPTIONS.map((option) => (
-                  <Pressable
-                    key={option}
-                    disabled={savingId === profile.id || profile.role === option}
-                    onPress={() => perform(profile.id, () => updateManagedProfile(profile.id, { role: option }))}
-                    style={[styles.roleChip, profile.role === option && styles.roleChipSelected]}
-                  >
-                    <Text style={[styles.roleChipText, profile.role === option && styles.roleChipTextSelected]}>
-                      {option === 'admin' ? 'Admin' : option === 'teacher' ? 'Teacher' : 'Student'}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-          </View>
-        ))}
-      </Section>
-
-      <Section title="Manage events">
-        {dashboard.events.length === 0 ? <Text style={styles.muted}>No events found.</Text> : null}
-        {dashboard.events.map((event) => (
-          <View key={event.id} style={styles.card}>
-            <Text style={styles.muted}>{event.event_code}</Text>
-            <TextInput
-              value={eventTitles[event.id] ?? event.title}
-              onChangeText={(value) => setEventTitles((current) => ({ ...current, [event.id]: value }))}
-              style={styles.input}
-              placeholder="Event title"
-              placeholderTextColor={COLORS.textSecondary}
-            />
-            <TextInput
-              value={eventVenues[event.id] ?? event.venue}
-              onChangeText={(value) => setEventVenues((current) => ({ ...current, [event.id]: value }))}
-              style={styles.input}
-              placeholder="Venue"
-              placeholderTextColor={COLORS.textSecondary}
-            />
-            <TextInput
-              value={eventStarts[event.id] ?? ''}
-              onChangeText={(value) => setEventStarts((current) => ({ ...current, [event.id]: value }))}
-              style={styles.input}
-              placeholder="Start time in ISO format"
-              placeholderTextColor={COLORS.textSecondary}
-              autoCapitalize="none"
-            />
-            <TextInput
-              value={eventEnds[event.id] ?? ''}
-              onChangeText={(value) => setEventEnds((current) => ({ ...current, [event.id]: value }))}
-              style={styles.input}
-              placeholder="End time in ISO format"
-              placeholderTextColor={COLORS.textSecondary}
-              autoCapitalize="none"
-            />
-            <TextInput
-              value={eventDescriptions[event.id] ?? event.description}
-              onChangeText={(value) =>
-                setEventDescriptions((current) => ({ ...current, [event.id]: value }))
-              }
-              style={[styles.input, styles.multilineInput]}
-              placeholder="Description"
-              placeholderTextColor={COLORS.textSecondary}
-              multiline
-            />
-            <Text style={styles.note}>Status: {event.status.toUpperCase()}</Text>
-            <View style={styles.actionRow}>
+        {selectedProfile ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              disabled={!!savingId}
+              onPress={() => setSelectedProfileId(null)}
+              style={styles.backButton}
+            >
+              <Ionicons name="arrow-back" size={18} color={COLORS.primary} />
+              <Text style={styles.backText}>Back</Text>
+            </Pressable>
+            <Text style={styles.selectedUserName}>
+              {selectedProfile.full_name || selectedProfile.email}
+            </Text>
+            <View style={styles.card}>
+              <Text style={styles.muted}>{selectedProfile.email}</Text>
+              <Text style={styles.smallMuted}>{selectedProfile.id}</Text>
+              <TextInput
+                value={userNames[selectedProfile.id] ?? ''}
+                onChangeText={(value) =>
+                  setUserNames((current) => ({ ...current, [selectedProfile.id]: value }))
+                }
+                style={styles.input}
+                placeholder="Full name"
+                placeholderTextColor={COLORS.textSecondary}
+              />
               <ActionButton
-                title="Save event details"
+                title="Save name"
                 disabled={
-                  savingId === event.id ||
-                  !(eventTitles[event.id] ?? '').trim() ||
-                  !(eventVenues[event.id] ?? '').trim() ||
-                  !(eventDescriptions[event.id] ?? '').trim() ||
-                  !Number.isFinite(Date.parse(eventStarts[event.id] ?? '')) ||
-                  !Number.isFinite(Date.parse(eventEnds[event.id] ?? '')) ||
-                  Date.parse(eventEnds[event.id] ?? '') <= Date.parse(eventStarts[event.id] ?? '')
+                  savingId === selectedProfile.id ||
+                  !(userNames[selectedProfile.id] ?? '').trim()
                 }
                 onPress={() =>
-                  perform(event.id, () =>
-                    updateManagedEvent(event.id, {
-                      title: (eventTitles[event.id] ?? '').trim(),
-                      start_time: new Date(eventStarts[event.id]).toISOString(),
-                      end_time: new Date(eventEnds[event.id]).toISOString(),
-                      venue: (eventVenues[event.id] ?? '').trim(),
-                      description: (eventDescriptions[event.id] ?? '').trim(),
+                  perform(selectedProfile.id, () =>
+                    updateManagedProfile(selectedProfile.id, {
+                      full_name: (userNames[selectedProfile.id] ?? '').trim(),
                     })
                   )
                 }
               />
-              <ActionButton
-                title={event.status === 'open' ? 'Close event' : 'Reopen event'}
-                disabled={savingId === event.id}
-                onPress={() =>
-                  perform(event.id, () =>
-                    setManagedEventStatus(event.id, event.status === 'open' ? 'closed' : 'open')
-                  )
-                }
-              />
-              <ActionButton
-                title="Delete event"
-                danger
-                disabled={savingId === event.id}
-                onPress={() => confirmDeleteEvent(event.id, event.title)}
-              />
-            </View>
-          </View>
-        ))}
-      </Section>
-
-      <Section title="Overall attendance and corrections">
-        {dashboard.attendance.length === 0 ? <Text style={styles.muted}>No attendance records found.</Text> : null}
-        {dashboard.attendance.map((record) => {
-          const event = eventById.get(record.event_id);
-          return (
-            <View key={record.id} style={styles.card}>
-              <Text style={styles.itemTitle}>{event?.title ?? 'Event removed'}</Text>
-              <Text style={styles.muted}>{nameById.get(record.student_id) ?? record.student_id}</Text>
-              <TextInput
-                value={attendanceTimes[record.id] ?? ''}
-                onChangeText={(value) =>
-                  setAttendanceTimes((current) => ({ ...current, [record.id]: value }))
-                }
-                style={styles.input}
-                autoCapitalize="none"
-                placeholder="Attendance time in ISO format"
-                placeholderTextColor={COLORS.textSecondary}
-              />
-              <Text style={styles.note}>Enter a date/time such as 2026-10-20T08:30:00+08:00.</Text>
-              <Text style={styles.note}>Attendance status: {record.status.toUpperCase()}</Text>
               <View style={styles.chipRow}>
-                {ATTENDANCE_STATUSES.map((status) => (
+                {ROLE_OPTIONS.map((option) => (
                   <Pressable
-                    key={status}
-                    disabled={savingId === record.id || record.status === status}
-                    onPress={() => perform(record.id, () => updateAttendanceStatus(record.id, status))}
-                    style={[styles.roleChip, record.status === status && styles.roleChipSelected]}
+                    key={option}
+                    disabled={savingId === selectedProfile.id || selectedProfile.role === option}
+                    onPress={() =>
+                      perform(selectedProfile.id, () =>
+                        updateManagedProfile(selectedProfile.id, { role: option })
+                      )
+                    }
+                    style={[
+                      styles.roleChip,
+                      selectedProfile.role === option && styles.roleChipSelected,
+                    ]}
                   >
-                    <Text style={[styles.roleChipText, record.status === status && styles.roleChipTextSelected]}>
-                      {status}
+                    <Text
+                      style={[
+                        styles.roleChipText,
+                        selectedProfile.role === option && styles.roleChipTextSelected,
+                      ]}
+                    >
+                      {option === 'teacher' ? 'Teacher' : 'Student'}
                     </Text>
                   </Pressable>
                 ))}
               </View>
-              <View style={styles.actionRow}>
-                <ActionButton
-                  title="Correct time"
-                  disabled={savingId === record.id || !Number.isFinite(Date.parse(attendanceTimes[record.id] ?? ''))}
-                  onPress={() =>
-                    perform(record.id, () =>
-                      correctAttendanceTime(record.id, new Date(attendanceTimes[record.id]).toISOString())
-                    )
-                  }
-                />
-                <ActionButton
-                  title="Delete record"
-                  danger
-                  disabled={savingId === record.id}
-                  onPress={() => confirmDeleteAttendance(record.id)}
-                />
-              </View>
             </View>
-          );
-        })}
+          </>
+        ) : (
+          <>
+            {[
+              { title: 'Teachers', role: 'teacher' as const, profiles: teacherProfiles },
+              { title: 'Students', role: 'student' as const, profiles: studentProfiles },
+            ].map(({ title, role: groupRole, profiles }) => {
+              const expanded = expandedUserGroups[groupRole];
+              return (
+                <View key={groupRole} style={styles.userGroup}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded }}
+                    onPress={() =>
+                      setExpandedUserGroups((current) => ({
+                        ...current,
+                        [groupRole]: !current[groupRole],
+                      }))
+                    }
+                    style={({ pressed }) => [
+                      styles.userGroupHeader,
+                      pressed && styles.userRowPressed,
+                    ]}
+                  >
+                    <Text style={styles.userGroupTitle}>
+                      {title} ({profiles.length})
+                    </Text>
+                    <Ionicons
+                      name={expanded ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color={COLORS.textSecondary}
+                    />
+                  </Pressable>
+                  {expanded ? (
+                    <View style={styles.userGroupContent}>
+                      {profiles.length === 0 ? (
+                        <Text style={styles.muted}>No {title.toLowerCase()} found.</Text>
+                      ) : (
+                        profiles.map((profile, index) => (
+                          <Pressable
+                            key={profile.id}
+                            accessibilityRole="button"
+                            style={({ pressed }) => [
+                              styles.groupUserRow,
+                              index < profiles.length - 1 && styles.groupUserRowBorder,
+                              pressed && styles.userRowPressed,
+                            ]}
+                            onPress={() => setSelectedProfileId(profile.id)}
+                          >
+                            <View style={styles.userAvatar}>
+                              {profile.avatar_url ? (
+                                <Image
+                                  source={{ uri: profile.avatar_url }}
+                                  style={styles.userAvatarImage}
+                                />
+                              ) : (
+                                <Ionicons name="person" size={20} color={COLORS.textSecondary} />
+                              )}
+                            </View>
+                            <Text style={styles.userRowText} numberOfLines={1}>
+                              {profile.full_name || profile.email}
+                            </Text>
+                          </Pressable>
+                        ))
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </>
+        )}
       </Section>
+      <TeacherEventTools embedded />
+
     </ScrollView>
   );
 }
@@ -428,7 +329,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700', color: COLORS.textPrimary, marginBottom: 8 },
   muted: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 6 },
   smallMuted: { color: COLORS.textSecondary, fontSize: 11, marginTop: 4 },
-  note: { color: COLORS.textSecondary, fontSize: 12, marginTop: 6 },
   error: { color: COLORS.danger, marginVertical: 10 },
   summaryRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
   summaryCard: {
@@ -443,7 +343,6 @@ const styles = StyleSheet.create({
   summaryValue: { fontSize: 22, fontWeight: '700', color: COLORS.primary },
   summaryLabel: { fontSize: 12, color: COLORS.textSecondary, marginTop: 4 },
   section: { marginTop: 24 },
-  reportTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '700', marginTop: 20 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary, marginBottom: 10 },
   card: {
     backgroundColor: COLORS.card,
@@ -452,6 +351,61 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 14,
     marginBottom: 10,
+  },
+  userGroup: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  userGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+  },
+  userGroupTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  userGroupContent: { paddingHorizontal: 14 },
+  groupUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  groupUserRowBorder: { borderBottomColor: COLORS.border, borderBottomWidth: 1 },
+  userAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: COLORS.background,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  userAvatarImage: { width: '100%', height: '100%' },
+  userRowPressed: { opacity: 0.65 },
+  userRowText: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '600' },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  backText: { color: COLORS.primary, fontSize: 15, fontWeight: '600', marginLeft: 5 },
+  selectedUserName: {
+    color: COLORS.textPrimary,
+    fontSize: 17,
+    fontWeight: '700',
+    marginTop: 12,
+    marginBottom: 8,
   },
   itemTitle: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 4 },
   chipRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
@@ -475,7 +429,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   multilineInput: { minHeight: 76, textAlignVertical: 'top' },
-  actionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 10 },
   actionButton: {
     backgroundColor: COLORS.primary,
     borderRadius: 8,
